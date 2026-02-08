@@ -28,7 +28,9 @@ import { TooltipSimple } from '@/components/ui/tooltip';
 import useChatStoreAdapter from '@/hooks/useChatStoreAdapter';
 import { share } from '@/lib/share';
 import { useAuthStore } from '@/store/authStore';
+import { useInstallationUI } from '@/store/installationStore';
 import { useSidebarStore } from '@/store/sidebarStore';
+import { ChatTaskStatus } from '@/types/constants';
 import {
   ChevronDown,
   ChevronLeft,
@@ -59,6 +61,10 @@ function HeaderWin() {
   const appearance = useAuthStore((state) => state.appearance);
   const [endDialogOpen, setEndDialogOpen] = useState(false);
   const [endProjectLoading, setEndProjectLoading] = useState(false);
+  const { isInstalling, installationState } = useInstallationUI();
+  const _isInstallationActive =
+    isInstalling || installationState === 'waiting-backend';
+
   useEffect(() => {
     const p = window.electronAPI.getPlatform();
     setPlatform(p);
@@ -90,22 +96,15 @@ function HeaderWin() {
     navigate('/');
   };
 
+  const summaryTask =
+    chatStore?.tasks[chatStore?.activeTaskId as string]?.summaryTask;
+
   const activeTaskTitle = useMemo(() => {
-    if (
-      chatStore?.activeTaskId &&
-      chatStore.tasks[chatStore.activeTaskId as string]?.summaryTask
-    ) {
-      return chatStore.tasks[
-        chatStore.activeTaskId as string
-      ].summaryTask.split('|')[0];
+    if (chatStore?.activeTaskId && summaryTask) {
+      return summaryTask.split('|')[0];
     }
     return t('layout.new-project');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    chatStore?.activeTaskId,
-    chatStore?.tasks[chatStore?.activeTaskId as string]?.summaryTask,
-    t,
-  ]);
+  }, [chatStore?.activeTaskId, summaryTask, t]);
 
   if (!chatStore) {
     return <div>Loading...</div>;
@@ -144,7 +143,7 @@ function HeaderWin() {
       const task = chatStore.tasks[taskId];
 
       // Stop the task if it's running
-      if (task && task.status === 'running') {
+      if (task && task.status === ChatTaskStatus.RUNNING) {
         await fetchPut(`/task/${taskId}/take-control`, {
           action: 'stop',
         });
@@ -158,7 +157,7 @@ function HeaderWin() {
       }
 
       // Delete from history using historyId
-      if (historyId && task.status !== 'finished') {
+      if (historyId && task.status !== ChatTaskStatus.FINISHED) {
         try {
           await proxyFetchDelete(`/api/chat/history/${historyId}`);
           // Remove from local store
@@ -333,7 +332,7 @@ function HeaderWin() {
                 chatStore.tasks[chatStore.activeTaskId as string]
                   ?.hasMessages ||
                 chatStore.tasks[chatStore.activeTaskId as string]?.status !==
-                  'pending') && (
+                  ChatTaskStatus.PENDING) && (
                 <TooltipSimple
                   content={t('layout.end-project')}
                   side="bottom"
@@ -352,7 +351,7 @@ function HeaderWin() {
               )}
             {chatStore.activeTaskId &&
               chatStore.tasks[chatStore.activeTaskId as string]?.status ===
-                'finished' && (
+                ChatTaskStatus.FINISHED && (
                 <TooltipSimple
                   content={t('layout.share')}
                   side="bottom"

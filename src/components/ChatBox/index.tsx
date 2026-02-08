@@ -23,6 +23,7 @@ import {
 import useChatStoreAdapter from '@/hooks/useChatStoreAdapter';
 import { generateUniqueId, replayActiveTask } from '@/lib';
 import { useAuthStore } from '@/store/authStore';
+import { AgentStep, ChatTaskStatus } from '@/types/constants';
 import { Square, SquareCheckBig, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -191,7 +192,7 @@ export default function ChatBox(): JSX.Element {
     if (!chatStore) return;
     const _hasSubTask = chatStore.tasks[
       chatStore.activeTaskId as string
-    ]?.messages?.find((message) => message.step === 'to_sub_tasks')
+    ]?.messages?.find((message) => message.step === AgentStep.TO_SUB_TASKS)
       ? true
       : false;
     setHasSubTask(_hasSubTask);
@@ -253,12 +254,14 @@ export default function ChatBox(): JSX.Element {
     const task = chatStore.tasks[chatStore.activeTaskId];
     return (
       // running or paused
-      task.status === 'running' ||
-      task.status === 'pause' ||
+      task.status === ChatTaskStatus.RUNNING ||
+      task.status === ChatTaskStatus.PAUSE ||
       // splitting phase
-      task.messages.some((m) => m.step === 'to_sub_tasks' && !m.isConfirm) ||
+      task.messages.some(
+        (m) => m.step === AgentStep.TO_SUB_TASKS && !m.isConfirm
+      ) ||
       // skeleton/computing phase
-      (!task.messages.find((m) => m.step === 'to_sub_tasks') &&
+      (!task.messages.find((m) => m.step === AgentStep.TO_SUB_TASKS) &&
         !task.hasWaitComfirm &&
         task.messages.length > 0) ||
       task.isTakeControl
@@ -424,17 +427,21 @@ export default function ChatBox(): JSX.Element {
     const requiresHumanReply = Boolean(task?.activeAsk);
     const isTaskBusy =
       // running or paused counts as busy
-      (task.status === 'running' && task.hasMessages) ||
-      task.status === 'pause' ||
+      (task.status === ChatTaskStatus.RUNNING && task.hasMessages) ||
+      task.status === ChatTaskStatus.PAUSE ||
       // splitting phase: has to_sub_tasks not confirmed OR skeleton computing
-      task.messages.some((m) => m.step === 'to_sub_tasks' && !m.isConfirm) ||
-      (!task.messages.find((m) => m.step === 'to_sub_tasks') &&
+      task.messages.some(
+        (m) => m.step === AgentStep.TO_SUB_TASKS && !m.isConfirm
+      ) ||
+      (!task.messages.find((m) => m.step === AgentStep.TO_SUB_TASKS) &&
         !task.hasWaitComfirm &&
         task.messages.length > 0) ||
       task.isTakeControl ||
       // explicit confirm wait while task is pending but card not confirmed yet
-      (!!task.messages.find((m) => m.step === 'to_sub_tasks' && !m.isConfirm) &&
-        task.status === 'pending');
+      (!!task.messages.find(
+        (m) => m.step === AgentStep.TO_SUB_TASKS && !m.isConfirm
+      ) &&
+        task.status === ChatTaskStatus.PENDING);
     const isReplayChatStore = task?.type === 'replay';
     if (!requiresHumanReply && isTaskBusy && !isReplayChatStore) {
       toast.error(
@@ -470,6 +477,7 @@ export default function ChatBox(): JSX.Element {
           agent: chatStore.tasks[_taskId].activeAsk,
           reply: tempMessageContent,
         });
+        chatStore.setAttaches(_taskId, []);
         if (chatStore.tasks[_taskId].askList.length === 0) {
           chatStore.setActiveAsk(_taskId, '');
         } else {
@@ -489,7 +497,7 @@ export default function ChatBox(): JSX.Element {
         const hasMessages =
           chatStore.tasks[_taskId as string].messages.length > 0;
         const isFinished =
-          chatStore.tasks[_taskId as string].status === 'finished';
+          chatStore.tasks[_taskId as string].status === ChatTaskStatus.FINISHED;
         const hasWaitComfirm =
           chatStore.tasks[_taskId as string]?.hasWaitComfirm;
 
@@ -497,7 +505,7 @@ export default function ChatBox(): JSX.Element {
         const wasTaskStopped =
           isFinished &&
           !chatStore.tasks[_taskId as string].messages.some(
-            (m) => m.step === 'end' // Natural completion has an "end" step message
+            (m) => m.step === AgentStep.END // Natural completion has an "end" step message
           );
 
         // Continue conversation if:
@@ -508,16 +516,17 @@ export default function ChatBox(): JSX.Element {
           (hasWaitComfirm && !wasTaskStopped) ||
           (isFinished && !wasTaskStopped) ||
           (hasMessages &&
-            chatStore.tasks[_taskId as string].status === 'pending');
+            chatStore.tasks[_taskId as string].status ===
+              ChatTaskStatus.PENDING);
 
         if (shouldContinueConversation) {
           // Check if this is the very first message and task hasn't started
           const hasSimpleResponse = chatStore.tasks[
             _taskId as string
-          ].messages.some((m) => m.step === 'wait_confirm');
+          ].messages.some((m) => m.step === AgentStep.WAIT_CONFIRM);
           const hasComplexTask = chatStore.tasks[
             _taskId as string
-          ].messages.some((m) => m.step === 'to_sub_tasks');
+          ].messages.some((m) => m.step === AgentStep.TO_SUB_TASKS);
           const hasErrorMessage = chatStore.tasks[
             _taskId as string
           ].messages.some(
@@ -527,7 +536,8 @@ export default function ChatBox(): JSX.Element {
           // Only start a new task if: pending, no messages processed yet
           // OR while or after replaying a project
           if (
-            (chatStore.tasks[_taskId as string].status === 'pending' &&
+            (chatStore.tasks[_taskId as string].status ===
+              ChatTaskStatus.PENDING &&
               !hasSimpleResponse &&
               !hasComplexTask &&
               !isFinished) ||
@@ -548,6 +558,7 @@ export default function ChatBox(): JSX.Element {
                 tempMessageContent,
                 attachesToSend
               );
+              chatStore.setAttaches(_taskId, []);
             } catch (err: any) {
               console.error('Failed to start task:', err);
               toast.error(
@@ -563,26 +574,30 @@ export default function ChatBox(): JSX.Element {
               '[Multi-turn] Continuing conversation with improve API'
             );
 
+            const attachesForThisTurn = JSON.parse(
+              JSON.stringify(chatStore.tasks[_taskId]?.attaches || [])
+            );
+            const improveAttaches =
+              attachesForThisTurn.map(
+                (f: { filePath: string }) => f.filePath
+              ) || [];
+
             //Generate nextId in case new chatStore is created to sync with the backend beforehand
             const nextTaskId = generateUniqueId();
             chatStore.setNextTaskId(nextTaskId);
 
             // Use improve endpoint (POST /chat/{id}) - {id} is project_id
-            // This reuses the existing SSE connection and step_solve loop
             fetchPost(`/chat/${projectStore.activeProjectId}`, {
               question: tempMessageContent,
               task_id: nextTaskId,
+              attaches: improveAttaches,
             });
             chatStore.setIsPending(_taskId, true);
-            // Add the user message to show it in UI
             chatStore.addMessages(_taskId, {
               id: generateUniqueId(),
               role: 'user',
               content: tempMessageContent,
-              attaches:
-                JSON.parse(
-                  JSON.stringify(chatStore.tasks[_taskId]?.attaches)
-                ) || [],
+              attaches: attachesForThisTurn,
             });
             chatStore.setAttaches(_taskId, []);
             setMessage('');
@@ -624,6 +639,7 @@ export default function ChatBox(): JSX.Element {
               attachesToSend
             );
             chatStore.setHasWaitComfirm(_taskId as string, true);
+            chatStore.setAttaches(_taskId, []);
           } catch (err: any) {
             console.error('Failed to start task:', err);
             toast.error(
@@ -669,10 +685,13 @@ export default function ChatBox(): JSX.Element {
       if (result.success && result.files && result.files.length > 0) {
         const taskId = chatStore.activeTaskId as string;
         const files = [
-          ...chatStore.tasks[taskId].attaches.filter(
-            (f) => !result.files.find((r: File) => r.filePath === f.filePath)
+          ...(chatStore.tasks[taskId].attaches || []),
+          ...result.files.filter(
+            (r: File) =>
+              !chatStore.tasks[taskId].attaches?.some(
+                (f: File) => f.filePath === r.filePath
+              )
           ),
-          ...result.files,
         ];
         chatStore.setAttaches(taskId, files);
       }
@@ -692,7 +711,7 @@ export default function ChatBox(): JSX.Element {
   const handlePauseResume = () => {
     const taskId = chatStore.activeTaskId as string;
     const task = chatStore.tasks[taskId];
-    const type = task.status === 'running' ? 'pause' : 'resume';
+    const type = task.status === ChatTaskStatus.RUNNING ? 'pause' : 'resume';
 
     setIsPauseResumeLoading(true);
     if (type === 'pause') {
@@ -701,10 +720,10 @@ export default function ChatBox(): JSX.Element {
       elapsed += now - taskTime;
       chatStore.setElapsed(taskId, elapsed);
       chatStore.setTaskTime(taskId, 0);
-      chatStore.setStatus(taskId, 'pause');
+      chatStore.setStatus(taskId, ChatTaskStatus.PAUSE);
     } else {
       chatStore.setTaskTime(taskId, Date.now());
-      chatStore.setStatus(taskId, 'running');
+      chatStore.setStatus(taskId, ChatTaskStatus.RUNNING);
     }
 
     fetchPut(`/task/${projectStore.activeProjectId}/take-control`, {
@@ -802,7 +821,7 @@ export default function ChatBox(): JSX.Element {
 
     // Get question and attachments before any deletions
     const messageIndex = chatStore.tasks[taskId].messages.findLastIndex(
-      (item) => item.step === 'to_sub_tasks'
+      (item) => item.step === AgentStep.TO_SUB_TASKS
     );
     const questionMessage = chatStore.tasks[taskId].messages[messageIndex - 2];
     const question = questionMessage.content;
@@ -856,16 +875,16 @@ export default function ChatBox(): JSX.Element {
 
     // Check for any to_sub_tasks message (confirmed or not)
     const anyToSubTasksMessage = task.messages.find(
-      (m) => m.step === 'to_sub_tasks'
+      (m) => m.step === AgentStep.TO_SUB_TASKS
     );
     const toSubTasksMessage = task.messages.find(
-      (m) => m.step === 'to_sub_tasks' && !m.isConfirm
+      (m) => m.step === AgentStep.TO_SUB_TASKS && !m.isConfirm
     );
 
     // Determine if we're in the "splitting in progress" phase (skeleton visible)
     // Only show splitting if there's NO to_sub_tasks message yet (not even confirmed)
     const isSkeletonPhase =
-      (task.status !== 'finished' &&
+      (task.status !== ChatTaskStatus.FINISHED &&
         !anyToSubTasksMessage &&
         !task.hasWaitComfirm &&
         task.messages.length > 0) ||
@@ -879,7 +898,7 @@ export default function ChatBox(): JSX.Element {
     if (
       toSubTasksMessage &&
       !toSubTasksMessage.isConfirm &&
-      task.status === 'pending'
+      task.status === ChatTaskStatus.PENDING
     ) {
       return 'confirm';
     }
@@ -890,11 +909,14 @@ export default function ChatBox(): JSX.Element {
     }
 
     // Check task status
-    if (task.status === 'running' || task.status === 'pause') {
+    if (
+      task.status === ChatTaskStatus.RUNNING ||
+      task.status === ChatTaskStatus.PAUSE
+    ) {
       return 'running';
     }
 
-    if (task.status === 'finished' && task.type !== '') {
+    if (task.status === ChatTaskStatus.FINISHED && task.type !== '') {
       return 'finished';
     }
 
@@ -938,7 +960,11 @@ export default function ChatBox(): JSX.Element {
       // Note: Replay creates a new chatstore, so no conflicts
       const task = chatStore.tasks[chatStore.activeTaskId as string];
       // Only skip backend call if task is finished or hasn't started yet (no messages)
-      if (task && task.messages.length > 0 && task.status !== 'finished') {
+      if (
+        task &&
+        task.messages.length > 0 &&
+        task.status !== ChatTaskStatus.FINISHED
+      ) {
         try {
           await fetchDelete(`/chat/${project_id}/remove-task/${task_id}`, {
             project_id: project_id,
@@ -1010,7 +1036,8 @@ export default function ChatBox(): JSX.Element {
               taskStatus={chatStore.tasks[chatStore.activeTaskId]?.status}
               onReplay={handleReplay}
               replayDisabled={
-                chatStore.tasks[chatStore.activeTaskId]?.status !== 'finished'
+                chatStore.tasks[chatStore.activeTaskId]?.status !==
+                ChatTaskStatus.FINISHED
               }
               replayLoading={isReplayLoading}
               onPauseResume={handlePauseResume}

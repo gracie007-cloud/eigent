@@ -13,6 +13,7 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import { generateUniqueId } from '@/lib';
+import { ChatTaskStatus } from '@/types/constants';
 import { create } from 'zustand';
 import { createChatStoreInstance, VanillaChatStore } from './chatStore';
 
@@ -173,7 +174,7 @@ const isEmptyProject = (project: Project): boolean => {
       task.summaryTask === '' &&
       task.progressValue === 0 &&
       task.isPending === false &&
-      task.status === 'pending' &&
+      task.status === ChatTaskStatus.PENDING &&
       task.taskTime === 0 &&
       task.tokens === 0 &&
       task.elapsed === 0 &&

@@ -21,6 +21,7 @@ import { share } from '@/lib/share';
 import { fetchGroupedHistoryTasks } from '@/service/historyApi';
 import { getAuthStore } from '@/store/authStore';
 import { useSidebarStore } from '@/store/sidebarStore';
+import { ChatTaskStatus } from '@/types/constants';
 import { HistoryTask, ProjectGroup } from '@/types/history';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -90,7 +91,7 @@ export default function HistorySidebar() {
         Object.keys(csState.tasks || {}).forEach((taskId) => {
           const task = csState.tasks[taskId];
           // Only include ongoing tasks
-          if (task.status !== 'finished' && !task.type) {
+          if (task.status !== ChatTaskStatus.FINISHED && !task.type) {
             hasOngoingTasks = true;
             taskCount++;
             if (task.tokens) {
